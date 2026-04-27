@@ -49,7 +49,7 @@ For design decisions, trade-offs, and how this maps to the assessment brief, see
 │   └── routes
 │       └── customerRoutes.ts
 ├── schema.sql
-├── postman_collection.json
+├── pepkor-assessment-collection.json
 ├── .env.example
 ├── TECHNICAL_WRITEUP.md
 └── README.md
@@ -247,7 +247,7 @@ The `customers` table is defined in `schema.sql`:
 
 ## Testing with Postman
 
-Import `postman_collection.json` into Postman.
+Import `pepkor-assessment-collection` into Postman.
 
 The collection includes all CRUD requests and uses `baseUrl` (default: `http://localhost:3000`) for easy environment switching.
 
