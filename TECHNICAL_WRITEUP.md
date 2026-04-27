@@ -2,53 +2,60 @@
 
 ## Objective
 
-The goal was to develop a robust, type-safe CRUD API using Node.js and TypeScript, backed by a MySQL instance. The system manages customer records (names, age, DOB) while ensuring data integrity through automated timestamps and strict validation.
+I set out to build a small but solid CRUD API in Node.js and TypeScript, backed by MySQL. It manages customer records (name, age, date of birth) and I wanted the usual guarantees: sensible validation, predictable errors, and timestamps I do not have to remember to set in application code.
 
 ## Architectural Approach
 
-I opted for a layered architecture, with clear separation between transport, validation, and persistence responsibilities. I have found this to be the most effective way to keep responsibilities decoupled and the codebase maintainable as it scales.
+I went with a layered layout because it matches how I think about a request: surface area first, then rules, then persistence. Keeping transport, validation, and data access in separate places has saved me pain on larger projects, so I applied the same idea here even at assessment size.
 
-- **Routes:** Defined the API surface area and orchestrated middleware.
-- **Controllers:** Handled the transport layer by managing HTTP requests, extracting input, and returning consistent response shapes.
-- **Models:** Isolated data access logic. By keeping SQL queries here, the rest of the application remains agnostic of the underlying database implementation.
-- **Middleware:** Integrated early-exit validation and centralized error handling to keep controller logic thin and focused.
+- **Routes:** Where I define the API shape and wire middleware before the controller runs.
+- **Controllers:** Where I translate HTTP into calls to the model and shape responses so callers get a consistent JSON contract.
+- **Models:** Where I keep SQL. I like the rest of the stack not caring whether the store is MySQL or something else later; the queries live in one place.
+- **Middleware:** Where I validate early and handle errors in one pipeline so controllers stay short and boring in a good way.
+
+## Why this folder layout and libraries
+
+**Folder structure:** Everything sits under `src/` in folders that mirror those layers (`routes`, `controllers`, `models`, `middleware`, `config`). If you are tracing a bug or onboarding someone, you can walk the path from the route file to the query without digging through a single giant module. I split **`app.ts`** and **`server.ts`** on purpose: `app.ts` is the Express instance—JSON body parsing, mounting routers, error handlers. `server.ts` loads env and calls `listen`. That way I can import the app (for tests or tooling) without opening a port, and boot stays obvious when I open the entry file.
+
+**Libraries:** I picked **Express** because it is what most Node teams already know; for a straight REST CRUD I did not need the ceremony of a larger framework. **`mysql2`** with promises gives me `async`/`await` against MySQL with a driver that is actively maintained, and I still write SQL myself so I can see exactly what runs and keep parameters bound. **`dotenv`** keeps host, port, and credentials out of the repo; local, staging, and production each supply their own env, which is how I would actually run this. For day-to-day coding I use **`ts-node-dev`** so I get quick restarts; for anything I would ship, **`npm run build`** runs `tsc` and I run `node dist/server.js` so production is plain Node on compiled JS—no surprises.
 
 ## Key Technical Decisions
 
-- **TypeScript for predictability:** I used TypeScript throughout to enforce strict contracts across layers. This reduces runtime errors and makes the code self-documenting for other developers.
-- **Direct SQL with `mysql2/promise`:** While ORMs have their place, I chose raw SQL with parameterized queries for this project. This allows for maximum transparency, better performance tuning, and protection against SQL injection.
-- **Fail-fast validation:** I implemented specialized middleware to intercept requests. If a payload is malformed, the API rejects it immediately with a `400 Bad Request`, preventing unnecessary database hits.
-- **Database-level timestamps:** I offloaded management of `created_at` and `updated_at` to the MySQL schema. This keeps data auditability consistent even if records are modified outside the API.
+- **TypeScript end to end:** I wanted types at boundaries between layers so refactors surface in the editor instead of at runtime. It also reads as documentation for whoever picks this up next.
+- **Raw SQL with `mysql2/promise`:** I am fine with ORMs when the team standardizes on one; here I wanted transparency and a small dependency footprint. Parameterized queries give me injection safety without hiding the SQL.
+- **Fail-fast validation:** I validate in middleware before hitting the database. Bad payloads return `400` immediately, which saves round trips and makes client mistakes obvious.
+- **Timestamps in MySQL:** I let `created_at` and `updated_at` default and update in the schema. Even if something touches the row outside this API, the row still carries a trustworthy audit trail.
 
 ## Data Model
 
-The `customers` table is designed for efficiency:
+I kept the `customers` table straightforward:
 
-- `id`: primary key (auto-increment)
-- `first_name` / `last_name`: standardized string fields
-- `age` / `date_of_birth`: stored to support age-verification logic
-- `created_at` / `updated_at`: managed via `DEFAULT CURRENT_TIMESTAMP` and `ON UPDATE`
+- `id` as an auto-increment primary key
+- `first_name` and `last_name` as the canonical name fields
+- `age` and `date_of_birth` to support the business rules around age
+- `created_at` / `updated_at` via `DEFAULT CURRENT_TIMESTAMP` and `ON UPDATE` so I am not duplicating that logic in TypeScript
 
 ## Error Handling and Reliability
 
-I implemented a global error handler as a final safety net so unexpected failures do not destabilize request handling.
+I added a global error handler at the end of the Express stack so nothing uncaught leaks out as a raw stack trace to the client.
 
-- **Validation errors (`400`):** clear, actionable feedback for consumers
-- **Resource handling (`404`):** proper responses for missing records
-- **Safety net (`500`):** catch-all handling for unexpected failures
+- **`400`:** validation and bad input, with messages I would want if I were integrating against this API
+- **`404`:** missing customer when the id does not exist
+- **`500`:** anything unexpected; I still log and respond in a controlled shape
 
 ## Verification Workflow
 
-- **Postman collection:** Included to demonstrate the full CRUD lifecycle
-- **Health checks:** A `/health` endpoint is available to verify service availability
-- **Build pipeline:** The project includes a standard TypeScript build step (`npm run build`) to ensure type-checking passes before deployment
+- **Postman collection:** I included it so you can run through create, read, update, and delete without guessing URLs or bodies.
+- **`/health`:** A lightweight check that the process is up—useful for load balancers or sanity after a deploy.
+- **`npm run build`:** I rely on the TypeScript compile step as a gate; if types fail, the build fails, which is cheap insurance before deployment.
 
 ## Trade-Offs and Future Roadmap
 
-For this technical assessment, I prioritized a clean, readable implementation that demonstrates core architectural competency. To move this closer to a production-ready standard aligned with modern enterprise workflows, the next steps are:
+For the scope of this assessment I deliberately stopped where the architecture is clear and the code is easy to read. If I were taking this toward production with a team, these are the things I would tackle next:
 
-- **Automated testing and CI/CD:** Implement a comprehensive test suite (unit and integration) and integrate it into CI so every PR is validated before merge.
-- **Schema evolution and migrations:** Introduce a migration tool (for example, Knex.js or TypeORM migrations) so database changes are version-controlled and consistent across environments.
-- **Advanced observability and logging:** Move from basic console logging to structured logging (Winston or Pino), with correlation IDs for request tracing.
-- **Containerization and scalability:** Dockerize both the API and MySQL, and use `docker-compose` to align local and deployment environments.
-- **API standards and security:** Generate OpenAPI/Swagger documentation and introduce security controls such as JWT authentication and rate limiting.
+- **Tests and CI:** Unit tests around validation and model behaviour, plus integration tests against a real MySQL (or container), wired into CI on every PR.
+- **Migrations:** A proper migration tool (Knex, Flyway-style, or similar) so schema changes are versioned like code.
+- **Observability:** Structured logs (Pino or Winston) and request correlation IDs instead of ad hoc `console.log`.
+- **Containers:** Docker for the API and database, with `docker-compose` for a one-command local environment that matches prod more closely.
+- **API docs and hardening:** OpenAPI/Swagger generated or hand-maintained alongside auth (for example JWT) and rate limiting at the edge.
+
